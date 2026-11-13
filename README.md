@@ -1,56 +1,135 @@
-# Welcome to your Expo app 👋
+# Aqua — monitoreo de tanque de agua
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Prototipo de app móvil (React Native + Expo) para consultar el nivel de agua de
+un tanque doméstico. El hardware real es un **ESP32-C3 SuperMini** con un sensor
+ultrasónico **AJ-SR04M** conectado por Wi-Fi; mientras tanto, la app funciona con
+un simulador de datos integrado.
 
-## Get started
+La pantalla principal muestra, de un vistazo:
 
-1. Install dependencies
+1. Qué porcentaje del tanque está lleno.
+2. Cuántos litros quedan disponibles.
+3. Si el sensor está conectado y si la medición es actual.
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Puesta en marcha
 
 ```bash
-npm run reset-project
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Comandos disponibles: `npm start`, `npm run ios`, `npm run android`, `npm run web`,
+`npm run lint` y `npx tsc --noEmit` para el chequeo de tipos.
 
-### Other setup steps
+## Arquitectura
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+La app separa la presentación del origen de los datos. La UI nunca habla con el
+hardware: consume eventos de una `TankDataSource`.
 
-## Learn more
+```
+src/
+  app/                  rutas de expo-router (_layout + dashboard)
+  components/           interfaz (tanque, encabezado, lectura, sheet de configuración)
+  constants/            paleta, tipografía y valores de configuración
+  data/tank/            modelo de datos y fuentes de datos
+  hooks/                utilidades reutilizables
+  providers/            TankProvider: une la fuente de datos con la UI
+  utils/                formateo de números y tiempos en español
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+### Modelo de medición
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+`src/data/tank/types.ts`
 
-## Join the community
+```ts
+interface TankReading {
+  levelPercent: number;  // 0–100, porcentaje medido
+  distanceCm: number | null; // distancia del sensor a la superficie, en cm
+  timestamp: number;     // epoch en ms de la medición
+}
+```
 
-Join our community of developers creating universal apps.
+Los litros restantes **no se almacenan**: se calculan siempre a partir del
+porcentaje medido y de la capacidad configurada
+(`remainingLiters(levelPercent, capacityLiters)`), de modo que cambiar la
+capacidad actualiza los litros al instante sin tocar el nivel medido.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+### Interfaz de la fuente de datos
+
+```ts
+interface TankDataSource {
+  readonly mode: 'simulated' | 'device';
+  readonly isAvailable: boolean;
+  start(): void;
+  stop(): void;
+  subscribe(listener: (event: TankSourceEvent) => void): () => void;
+}
+```
+
+`TankSourceEvent` puede ser `{ type: 'reading', reading }` o
+`{ type: 'status', status: 'connecting' | 'connected' | 'disconnected' }`.
+
+- `MockTankSource` (`src/data/tank/mock-source.ts`): simulador determinista.
+  Publica una medición cada 2 s con variaciones graduales y acotadas. Permite
+  cortar la conexión a propósito (interruptor "Simular corte de conexión") para
+  verificar el estado "sin conexión".
+- `HttpTankSource` (`src/data/tank/http-source.ts`): consulta por HTTP al
+  dispositivo real.
+
+La fábrica `createTankSource(mode)` (`src/data/tank/index.ts`) es el único punto
+que decide de dónde vienen los datos.
+
+## Integración con el ESP32
+
+### Endpoint
+
+Definí la variable de entorno antes de iniciar la app:
+
+```bash
+EXPO_PUBLIC_TANK_API_URL=http://192.168.0.50:8080 npx expo start
+```
+
+La app consulta `{EXPO_PUBLIC_TANK_API_URL}/api/v1/tank/reading` cada 3 s. Sin
+esa variable, el modo "Dispositivo" queda deshabilitado en Configuración y la app
+sigue funcionando con datos simulados.
+
+### Formato de la respuesta
+
+```json
+{
+  "levelPercent": 68.4,
+  "distanceCm": 51.6,
+  "timestamp": 1720000000000
+}
+```
+
+- `levelPercent` (obligatorio): porcentaje de agua, entre 0 y 100.
+- `distanceCm` (opcional): distancia del sensor a la superficie del agua, en cm.
+- `timestamp` (opcional): epoch en ms; si falta, se usa la hora de recepción.
+
+Cualquier valor fuera de rango se descarta: la UI nunca muestra una medición
+inválida. Ante dos respuestas fallidas consecutivas la app pasa a "Sin conexión",
+conserva la última lectura válida y la rotula como antigua.
+
+### Otros transportes
+
+Para recibir las lecturas por WebSocket o MQTT alcanza con implementar
+`TankDataSource` y cambiar la fábrica en `src/data/tank/index.ts`; el resto de la
+app no cambia.
+
+## Configuración desde la app
+
+El botón de la esquina superior derecha abre un sheet con:
+
+- **Capacidad del tanque**: se define en litros (1.000 L por defecto). Cambia los
+  litros calculados, no el nivel medido.
+- **Modo de conexión**: simulación o dispositivo real.
+- **Estado de la conexión**: estado actual y última medición válida.
+
+## Notas del prototipo
+
+- La capacidad se mantiene en memoria: se reinicia con la app. Para persistirla
+  hace falta agregar un almacenamiento local (por ejemplo
+  `@react-native-async-storage/async-storage`).
+- Las mediciones simuladas están rotuladas como "Simulado" en el encabezado para
+  que nunca se confundan con datos de un sensor real.

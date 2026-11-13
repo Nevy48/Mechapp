@@ -4,7 +4,23 @@ import { Fonts, ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export type ThemedTextProps = TextProps & {
-  type?: 'default' | 'title' | 'small' | 'smallBold' | 'subtitle' | 'link' | 'linkPrimary' | 'code';
+  type?:
+    | 'default'
+    | 'title'
+    | 'small'
+    | 'smallBold'
+    | 'subtitle'
+    | 'link'
+    | 'linkPrimary'
+    | 'code'
+    /** Cifra principal: el nivel del tanque. */
+    | 'display'
+    /** Titular de sección. */
+    | 'headline'
+    /** Metadatos discretos. */
+    | 'caption'
+    /** Antetítulo en mayúsculas. */
+    | 'label';
   themeColor?: ThemeColor;
 };
 
@@ -23,6 +39,10 @@ export function ThemedText({ style, type = 'default', themeColor, ...rest }: The
         type === 'link' && styles.link,
         type === 'linkPrimary' && styles.linkPrimary,
         type === 'code' && styles.code,
+        type === 'display' && styles.display,
+        type === 'headline' && styles.headline,
+        type === 'caption' && styles.caption,
+        type === 'label' && styles.label,
         style,
       ]}
       {...rest}
@@ -49,7 +69,6 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 48,
     fontWeight: 600,
-    lineHeight: 52,
   },
   subtitle: {
     fontSize: 32,
@@ -69,5 +88,30 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.mono,
     fontWeight: Platform.select({ android: 700 }) ?? 500,
     fontSize: 12,
+  },
+  display: {
+    fontSize: 78,
+    lineHeight: 86,
+    fontWeight: '600',
+    letterSpacing: -3.6,
+    fontVariant: ['tabular-nums'],
+  },
+  headline: {
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: '600',
+    letterSpacing: -0.4,
+  },
+  caption: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+  label: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '600',
+    letterSpacing: 0.9,
+    textTransform: 'uppercase',
   },
 });
