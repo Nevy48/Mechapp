@@ -21,13 +21,59 @@ export interface TankReading {
   levelPercent: number;
   distanceCm: number | null;
   timestamp: number;
+  /**
+   * Estado del control de llenado (bomba, cisterna, fallas). `null` cuando el
+   * equipo sólo informa el nivel (firmware anterior al control de llenado).
+   */
+  control: FillControlState | null;
+}
+
+/**
+ * Estado de la máquina de llenado del firmware.
+ *
+ * - `idle`: tanque con agua suficiente, sin orden de llenado (REPOSO).
+ * - `waitingCistern`: hace falta llenar pero la cisterna no tiene agua (ESPERA_CISTERNA).
+ * - `filling`: el relé está cerrado y la bomba sube agua (LLENANDO).
+ * - `fault`: se cortó por una falla y va a reintentar solo (FALLA).
+ * - `locked`: varias fallas seguidas; requiere reiniciar el equipo (BLOQUEO).
+ */
+export type FillState = 'idle' | 'waitingCistern' | 'filling' | 'fault' | 'locked';
+
+/**
+ * Motivo de la última falla del llenado.
+ *
+ * - `noFlow`: la bomba funcionó pero el nivel no subió (SIN_CAUDAL).
+ * - `timeout`: se superó el tiempo máximo de llenado (TIEMPO_MAX).
+ * - `sensor`: lectura del sensor fuera de rango (SENSOR).
+ */
+export type FillFault = 'noFlow' | 'timeout' | 'sensor';
+
+export interface FillControlState {
+  /** Orden de la bomba: `true` cuando el relé está cerrado. */
+  pumpOn: boolean;
+  /** Lo que informa el automático de la cisterna. `null` si el equipo no lo reporta. */
+  cisternHasWater: boolean | null;
+  fillState: FillState;
+  fault: FillFault | null;
+  /** `false` cuando el firmware marca la medición como falla de sensor. */
+  sensorOk: boolean;
 }
 
 export type TankSourceEvent =
   | { type: 'reading'; reading: TankReading }
   | { type: 'status'; status: ConnectionStatus; detail?: string }
   /** Sólo la fuente simulada: avisa cuando arranca o termina la simulación de llenado. */
-  | { type: 'simulation'; running: boolean };
+  | { type: 'simulation'; running: boolean }
+  /** Sólo la fuente simulada: estado de los controles de prueba (cisterna, falla de bomba). */
+  | { type: 'simulationControls'; controls: SimulationControls };
+
+/** Controles de prueba de la fuente simulada. */
+export interface SimulationControls {
+  /** Posición del automático de la cisterna simulado. */
+  cisternHasWater: boolean;
+  /** Simula una bomba que funciona pero no sube agua (cañería tapada, bomba sin cebar). */
+  pumpFailure: boolean;
+}
 
 export interface TankDataSource {
   readonly mode: TankSourceMode;

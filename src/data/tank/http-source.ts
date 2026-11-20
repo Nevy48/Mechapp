@@ -9,6 +9,9 @@ import {
   isValidDistanceCm,
   isValidLevelPercent,
   type ConnectionStatus,
+  type FillControlState,
+  type FillFault,
+  type FillState,
   type TankDataSource,
   type TankReading,
   type TankSourceEvent,
@@ -29,8 +32,17 @@ import {
  * - `distanceCm` (opcional): distancia del sensor a la superficie, en cm.
  * - `timestamp` (opcional): epoch en ms; si falta se usa la hora de recepción.
  *
- * También acepta la trama del firmware del Arduino tal cual sale por serie:
- * `{"id":"T1","nivel":68,"litros":340,"dist_cm":42,"alerta":"OK"}`.
+ * También acepta la trama del firmware del Arduino tal cual sale por serie,
+ * incluido el control de llenado:
+ *
+ * ```json
+ * {"id":"T1","nivel":15,"litros":75,"dist_cm":95,"alerta":"BAJO",
+ *  "cisterna":"CON_AGUA","bomba":"ON","llenado":"LLENANDO","falla":"-"}
+ * ```
+ *
+ * Los campos del control (`cisterna`, `bomba`, `llenado`, `falla`) son
+ * opcionales: si el equipo no los manda, `control` queda en `null` y la app
+ * funciona como monitor de nivel solamente.
  *
  * Cualquier valor fuera de rango se descarta: la UI nunca muestra una
  * medición inválida.
@@ -49,7 +61,77 @@ export function parseDevicePayload(payload: unknown): TankReading | null {
       ? body.timestamp
       : Date.now();
 
-  return { levelPercent, distanceCm, timestamp };
+  return { levelPercent, distanceCm, timestamp, control: parseControl(body) };
+}
+
+const FILL_STATES: Record<string, FillState> = {
+  REPOSO: 'idle',
+  ESPERA_CISTERNA: 'waitingCistern',
+  LLENANDO: 'filling',
+  FALLA: 'fault',
+  BLOQUEO: 'locked',
+};
+
+const FILL_FAULTS: Record<string, FillFault> = {
+  SIN_CAUDAL: 'noFlow',
+  TIEMPO_MAX: 'timeout',
+  SENSOR: 'sensor',
+};
+
+const FILL_STATE_VALUES = new Set<string>(Object.values(FILL_STATES));
+const FILL_FAULT_VALUES = new Set<string>(Object.values(FILL_FAULTS));
+
+function parseFillState(value: unknown): FillState | null {
+  if (typeof value !== 'string') return null;
+  if (FILL_STATE_VALUES.has(value)) return value as FillState;
+  return FILL_STATES[value.toUpperCase()] ?? null;
+}
+
+function parseFillFault(value: unknown): FillFault | null {
+  if (typeof value !== 'string') return null;
+  if (FILL_FAULT_VALUES.has(value)) return value as FillFault;
+  return FILL_FAULTS[value.toUpperCase()] ?? null;
+}
+
+function parseOnOff(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return null;
+  const upper = value.toUpperCase();
+  if (upper === 'ON') return true;
+  if (upper === 'OFF') return false;
+  return null;
+}
+
+function parseCistern(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return null;
+  const upper = value.toUpperCase();
+  if (upper === 'CON_AGUA') return true;
+  if (upper === 'VACIA' || upper === 'VACÍA') return false;
+  return null;
+}
+
+/**
+ * Estado del control de llenado. Acepta los nombres del firmware (`bomba`,
+ * `cisterna`, `llenado`, `falla`) o los de la API (`pumpOn`, `cisternHasWater`,
+ * `fillState`, `fault`). Sin estado de llenado reconocible devuelve `null`.
+ */
+export function parseControl(body: Record<string, unknown>): FillControlState | null {
+  const fillState = parseFillState(body.fillState ?? body.llenado);
+  if (!fillState) return null;
+
+  const pumpOn = parseOnOff(body.pumpOn ?? body.bomba) ?? fillState === 'filling';
+  const alerta = typeof body.alerta === 'string' ? body.alerta.toUpperCase() : null;
+  const sensorOk =
+    typeof body.sensorOk === 'boolean' ? body.sensorOk : alerta !== 'FALLA_SENSOR';
+
+  return {
+    pumpOn,
+    cisternHasWater: parseCistern(body.cisternHasWater ?? body.cisterna),
+    fillState,
+    fault: parseFillFault(body.fault ?? body.falla),
+    sensorOk,
+  };
 }
 
 /**

@@ -1,53 +1,30 @@
 import {
-  FILL_SIMULATION_DURATION_MS,
-  FILL_SIMULATION_EMPTY_HOLD_MS,
-  FILL_SIMULATION_UPDATE_INTERVAL_MS,
   MOCK_INITIAL_LEVEL_PERCENT,
   MOCK_UPDATE_INTERVAL_MS,
   SENSOR_DISTANCE_EMPTY_CM,
   SENSOR_DISTANCE_FULL_CM,
+  SIM_CONSUMPTION_PERCENT_PER_S,
+  SIM_DRAIN_PERCENT_PER_S,
+  SIM_DRAIN_TARGET_PERCENT,
+  SIM_PUMP_RATE_PERCENT_PER_S,
+  SIM_TICK_MS,
 } from '@/constants/config';
 
+import { FillController } from './fill-controller';
 import {
   clampLevelPercent,
   type ConnectionStatus,
+  type FillControlState,
+  type SimulationControls,
   type TankDataSource,
   type TankReading,
   type TankSourceEvent,
 } from './types';
 
-/**
- * Nivel simulado en función del tiempo transcurrido.
- *
- * Es una suma de senos con períodos largos: el nivel sube y baja de forma
- * gradual (nunca hay saltos) y permanece siempre dentro de un rango acotado.
- */
-export function simulateLevelPercent(elapsedMs: number): number {
-  const seconds = elapsedMs / 1000;
-  const swell = -5.5 * Math.sin((2 * Math.PI * seconds) / 420);
-  const ripple = 3.2 * Math.sin((2 * Math.PI * seconds) / 900);
-  return clampLevelPercent(MOCK_INITIAL_LEVEL_PERCENT + swell + ripple + sensorJitter(elapsedMs));
-}
-
 /** Ruido leve del sensor: unas décimas, nunca saltos. */
-function sensorJitter(elapsedMs: number): number {
+export function sensorJitter(elapsedMs: number): number {
   const seconds = elapsedMs / 1000;
   return 0.12 * Math.sin(seconds * 1.7) + 0.06 * Math.sin(seconds * 0.63 + 2.1);
-}
-
-/**
- * Nivel durante la simulación de llenado.
- *
- * Arranca con el tanque vacío unos segundos y después se llena. El llenado
- * se desacelera al final, como cuando el flotante va cerrando la entrada.
- */
-export function simulateFillLevelPercent(elapsedMs: number): number {
-  const fillingMs = elapsedMs - FILL_SIMULATION_EMPTY_HOLD_MS;
-  if (fillingMs <= 0) return 0;
-
-  const progress = Math.min(1, fillingMs / FILL_SIMULATION_DURATION_MS);
-  const eased = 1 - Math.pow(1 - progress, 1.6);
-  return clampLevelPercent(eased * 100 + (progress < 1 ? sensorJitter(elapsedMs) * 2 : 0));
 }
 
 /**
@@ -61,11 +38,34 @@ export function simulateDistanceCm(levelPercent: number): number {
 }
 
 /**
+ * Cuánto cambia el nivel en un paso de simulación.
+ *
+ * La casa consume siempre un poco; el botón "Vaciar" simula un consumo fuerte.
+ * La bomba sólo sube agua si la cisterna tiene agua y no hay falla simulada.
+ */
+export function simulateLevelDelta(options: {
+  dtMs: number;
+  pumpOn: boolean;
+  cisternHasWater: boolean;
+  pumpFailure: boolean;
+  draining: boolean;
+}): number {
+  const seconds = options.dtMs / 1000;
+  const consumption = options.draining ? SIM_DRAIN_PERCENT_PER_S : SIM_CONSUMPTION_PERCENT_PER_S;
+  const pumping =
+    options.pumpOn && options.cisternHasWater && !options.pumpFailure
+      ? SIM_PUMP_RATE_PERCENT_PER_S
+      : 0;
+  return (pumping - consumption) * seconds;
+}
+
+/**
  * Fuente de datos simulada.
  *
- * Reemplaza al ESP32 durante el prototipo. Publica mediciones graduales y
- * permite cortar la conexión a propósito para poder verificar el estado
- * "sin conexión" de la app.
+ * Reemplaza al equipo real durante el prototipo. Simula el tanque, la cisterna
+ * y la bomba, y corre la misma máquina de estados que el firmware, así la app
+ * muestra exactamente lo que vería con el Arduino: arranque y corte de la
+ * bomba, espera por cisterna vacía, fallas y bloqueo.
  */
 export class MockTankSource implements TankDataSource {
   readonly mode = 'simulated' as const;
@@ -75,13 +75,17 @@ export class MockTankSource implements TankDataSource {
   private timer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private startedAt = 0;
+  private lastTickAt = 0;
+  private lastPublishAt = 0;
   private online = true;
-  /** Inicio de la simulación de llenado en curso, o `null` si no hay ninguna. */
-  private fillStartedAt: number | null = null;
-  /** Nivel en el que quedó el tanque al terminar o detener una simulación. */
-  private heldLevel: number | null = null;
-  private lastLevel = MOCK_INITIAL_LEVEL_PERCENT;
   private status: ConnectionStatus = 'connecting';
+
+  /** Nivel "real" del agua (sin el ruido del sensor). */
+  private level = MOCK_INITIAL_LEVEL_PERCENT;
+  private draining = false;
+  private controls: SimulationControls = { cisternHasWater: true, pumpFailure: false };
+  private controller = new FillController();
+  private control: FillControlState = this.controller.snapshot();
 
   subscribe(listener: (event: TankSourceEvent) => void): () => void {
     this.listeners.add(listener);
@@ -93,12 +97,16 @@ export class MockTankSource implements TankDataSource {
   start(): void {
     if (this.timer) return;
 
-    this.startedAt = Date.now();
+    const now = Date.now();
+    this.startedAt = now;
+    this.lastTickAt = now;
     this.online = true;
+    this.controller.reset(now);
     this.setStatus('connecting');
-    this.publishReading();
+    this.emit({ type: 'simulationControls', controls: this.controls });
+    this.tick(true);
     this.setStatus('connected');
-    this.startTimer(MOCK_UPDATE_INTERVAL_MS);
+    this.timer = setInterval(() => this.tick(false), SIM_TICK_MS);
   }
 
   stop(): void {
@@ -106,7 +114,6 @@ export class MockTankSource implements TankDataSource {
       clearInterval(this.timer);
       this.timer = null;
     }
-    this.fillStartedAt = null;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -115,8 +122,8 @@ export class MockTankSource implements TankDataSource {
   }
 
   /**
-   * Corta o restablece la conexión simulada.
-   * Al reconectar se anuncia "Reconectando…" antes de volver a publicar datos.
+   * Corta o restablece la conexión simulada. El tanque y la bomba siguen
+   * funcionando: sólo se dejan de recibir datos, como pasaría con el Wi-Fi.
    */
   setSimulatedOnline(online: boolean): void {
     if (online === this.online) return;
@@ -140,71 +147,98 @@ export class MockTankSource implements TankDataSource {
     }, 1600);
   }
 
-  /** Vacía el tanque y lo llena de a poco, para mostrar la app en vivo. */
-  startFillSimulation(): void {
-    this.fillStartedAt = Date.now();
-    this.heldLevel = null;
+  /** Simula un consumo fuerte: el tanque baja rápido y el control tiene que llenarlo. */
+  startDrain(): void {
+    this.draining = true;
     this.emit({ type: 'simulation', running: true });
-    this.startTimer(FILL_SIMULATION_UPDATE_INTERVAL_MS);
-    if (this.online) this.publishReading();
   }
 
-  /**
-   * Fija el nivel a mano (arrastrando el agua en el tanque). Corta la
-   * simulación de llenado si estaba corriendo y publica la medición al toque.
-   */
-  setManualLevel(levelPercent: number): void {
-    const level = clampLevelPercent(levelPercent);
-    if (this.fillStartedAt !== null) {
-      this.finishFillSimulation(level);
-    }
-    this.heldLevel = level;
-    if (this.online) this.publishReading();
-  }
-
-  /** Corta la simulación: el tanque queda en el nivel al que había llegado. */
-  stopFillSimulation(): void {
-    if (this.fillStartedAt === null) return;
-    this.finishFillSimulation(this.lastLevel);
-  }
-
-  private finishFillSimulation(level: number): void {
-    this.fillStartedAt = null;
-    this.heldLevel = level;
+  stopDrain(): void {
+    if (!this.draining) return;
+    this.draining = false;
     this.emit({ type: 'simulation', running: false });
-    this.startTimer(MOCK_UPDATE_INTERVAL_MS);
   }
 
-  private startTimer(intervalMs: number): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = setInterval(() => {
-      if (!this.online) return;
-      this.publishReading();
-    }, intervalMs);
+  /** Fija el nivel a mano (arrastrando el agua en el tanque). */
+  setManualLevel(levelPercent: number): void {
+    this.stopDrain();
+    this.level = clampLevelPercent(levelPercent);
+    this.tick(true);
   }
 
-  private nextLevel(now: number): number {
-    if (this.fillStartedAt !== null) {
-      const elapsed = now - this.fillStartedAt;
-      const level = simulateFillLevelPercent(elapsed);
-      if (elapsed >= FILL_SIMULATION_EMPTY_HOLD_MS + FILL_SIMULATION_DURATION_MS) {
-        this.finishFillSimulation(level);
-      }
-      return level;
+  setCisternWater(hasWater: boolean): void {
+    this.setControls({ ...this.controls, cisternHasWater: hasWater });
+  }
+
+  setPumpFailure(failure: boolean): void {
+    this.setControls({ ...this.controls, pumpFailure: failure });
+  }
+
+  /** Equivale al botón de reset del Arduino: sale del bloqueo. */
+  resetController(): void {
+    this.controller.reset(Date.now());
+    this.tick(true);
+  }
+
+  private setControls(controls: SimulationControls): void {
+    this.controls = controls;
+    this.emit({ type: 'simulationControls', controls });
+  }
+
+  private tick(forcePublish: boolean): void {
+    const now = Date.now();
+    const dtMs = Math.min(5000, Math.max(0, now - this.lastTickAt));
+    this.lastTickAt = now;
+
+    this.level = clampLevelPercent(
+      this.level +
+        simulateLevelDelta({
+          dtMs,
+          pumpOn: this.control.pumpOn,
+          cisternHasWater: this.controls.cisternHasWater,
+          pumpFailure: this.controls.pumpFailure,
+          draining: this.draining,
+        })
+    );
+
+    if (this.draining && this.level <= SIM_DRAIN_TARGET_PERCENT) {
+      this.stopDrain();
     }
-    if (this.heldLevel !== null) {
-      return clampLevelPercent(this.heldLevel + sensorJitter(now - this.startedAt));
+
+    const previous = this.control;
+    this.control = this.controller.update({
+      now,
+      levelPercent: this.level,
+      sensorOk: true,
+      cisternRaw: this.controls.cisternHasWater,
+    });
+
+    const changed =
+      previous.pumpOn !== this.control.pumpOn ||
+      previous.fillState !== this.control.fillState ||
+      previous.cisternHasWater !== this.control.cisternHasWater;
+    // El nivel quieto se publica cada 2 s; con movimiento o cambios de estado,
+    // en cada paso para que el tanque se vea fluido.
+    const moving = this.control.pumpOn || this.draining;
+    if (
+      forcePublish ||
+      changed ||
+      moving ||
+      now - this.lastPublishAt >= MOCK_UPDATE_INTERVAL_MS
+    ) {
+      if (this.online) this.publishReading();
     }
-    return simulateLevelPercent(now - this.startedAt);
   }
 
   private publishReading(): void {
-    const levelPercent = this.nextLevel(Date.now());
-    this.lastLevel = levelPercent;
+    const now = Date.now();
+    this.lastPublishAt = now;
+    const levelPercent = clampLevelPercent(this.level + sensorJitter(now - this.startedAt));
     const reading: TankReading = {
       levelPercent,
       distanceCm: simulateDistanceCm(levelPercent),
-      timestamp: Date.now(),
+      timestamp: now,
+      control: this.control,
     };
     this.emit({ type: 'reading', reading });
   }

@@ -49,3 +49,21 @@ export function formatElapsed(timestamp: number | null, now: number): string | n
   const hours = Math.round(minutes / 60);
   return `hace ${hours} h`;
 }
+
+/** Hora del día, 24 h: "19:42". */
+export function formatClock(timestamp: number): string {
+  const date = new Date(timestamp);
+  const hh = date.getHours().toString().padStart(2, '0');
+  const mm = date.getMinutes().toString().padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+/** Duración breve: "45 s", "3 min", "1 h 05 min". */
+export function formatDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} h ${(minutes % 60).toString().padStart(2, '0')} min`;
+}

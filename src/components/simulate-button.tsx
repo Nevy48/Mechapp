@@ -13,8 +13,8 @@ export type SimulateButtonProps = {
 };
 
 /**
- * Arranca o detiene la simulación de llenado: el tanque se vacía y se llena
- * de a poco, para mostrar la app en vivo con datos simulados.
+ * Simula un consumo fuerte: el tanque se vacía rápido y el control de
+ * llenado tiene que arrancar la bomba solo, como en la instalación real.
  */
 export function SimulateButton({ running, onPress }: SimulateButtonProps) {
   const theme = useTheme();
@@ -23,7 +23,7 @@ export function SimulateButton({ running, onPress }: SimulateButtonProps) {
     <PressableScale
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={running ? 'Detener simulación de llenado' : 'Simular llenado del tanque'}
+      accessibilityLabel={running ? 'Detener el vaciado' : 'Simular consumo: vaciar el tanque'}
       style={styles.button}>
       <GlassSurface style={styles.surface}>
         <Svg width={10} height={10} viewBox="0 0 10 10">
@@ -34,7 +34,7 @@ export function SimulateButton({ running, onPress }: SimulateButtonProps) {
           )}
         </Svg>
         <ThemedText type="caption" style={[styles.label, { color: theme.accentText }]}>
-          {running ? 'Detener' : 'Simular'}
+          {running ? 'Detener' : 'Vaciar'}
         </ThemedText>
       </GlassSurface>
     </PressableScale>

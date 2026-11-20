@@ -26,6 +26,7 @@ import { Radius } from '@/constants/theme';
 import { useNow } from '@/hooks/use-now';
 import { useTheme } from '@/hooks/use-theme';
 import { useTank } from '@/providers/tank-provider';
+import { FILL_STATE_LABELS } from '@/data/tank';
 import { formatElapsed, formatNumber } from '@/utils/format';
 
 /** Paso de los botones de capacidad, en litros. */
@@ -52,6 +53,11 @@ export function SettingsSheet({ visible, onClose }: SettingsSheetProps) {
     reading,
     isSimulatedOnline,
     setSimulatedConnection,
+    control,
+    simulationControls,
+    setCisternWater,
+    setPumpFailure,
+    resetController,
   } = useTank();
 
   const [mounted, setMounted] = useState(visible);
@@ -153,6 +159,12 @@ export function SettingsSheet({ visible, onClose }: SettingsSheetProps) {
       : isDeviceAvailable
         ? 'Lecturas reales del sensor por Wi-Fi.'
         : 'Falta definir EXPO_PUBLIC_TANK_API_URL para conectar el dispositivo.';
+
+  const controlSummary = control
+    ? `${FILL_STATE_LABELS[control.fillState]} · bomba ${control.pumpOn ? 'encendida' : 'apagada'}`
+    : mode === 'device' && reading
+      ? 'El equipo no informa el control de llenado (firmware anterior).'
+      : 'sin datos';
 
   const lastReading = reading
     ? `${Math.round(reading.levelPercent)}% · ${formatElapsed(reading.timestamp, now) ?? 'sin datos'}`
@@ -323,11 +335,46 @@ export function SettingsSheet({ visible, onClose }: SettingsSheetProps) {
             <ThemedText type="caption" themeColor="textTertiary">
               Última medición: {lastReading}
             </ThemedText>
+            <ThemedText type="caption" themeColor="textTertiary">
+              Control de llenado: {controlSummary}
+            </ThemedText>
           </View>
 
           {mode === 'simulated' && (
             <>
               <View style={[styles.divider, { backgroundColor: theme.hairline }]} />
+
+              <ThemedText type="label" themeColor="textTertiary" style={styles.groupLabel}>
+                Pruebas de la simulación
+              </ThemedText>
+
+              <View style={styles.sectionRow}>
+                <View style={styles.sectionRowText}>
+                  <ThemedText type="default">Cisterna con agua</ThemedText>
+                  <ThemedText type="caption" themeColor="textTertiary">
+                    Es el automático de la cisterna
+                  </ThemedText>
+                </View>
+                <Switch
+                  value={simulationControls?.cisternHasWater ?? true}
+                  onValueChange={setCisternWater}
+                  accessibilityLabel="Cisterna con agua"
+                />
+              </View>
+
+              <View style={styles.sectionRow}>
+                <View style={styles.sectionRowText}>
+                  <ThemedText type="default">Bomba sin caudal</ThemedText>
+                  <ThemedText type="caption" themeColor="textTertiary">
+                    Funciona pero no sube agua: prueba las fallas
+                  </ThemedText>
+                </View>
+                <Switch
+                  value={simulationControls?.pumpFailure ?? false}
+                  onValueChange={setPumpFailure}
+                  accessibilityLabel="Simular bomba sin caudal"
+                />
+              </View>
 
               <View style={styles.sectionRow}>
                 <View style={styles.sectionRowText}>
@@ -342,6 +389,18 @@ export function SettingsSheet({ visible, onClose }: SettingsSheetProps) {
                   accessibilityLabel="Simular corte de conexión"
                 />
               </View>
+
+              {(control?.fillState === 'locked' || control?.fillState === 'fault') && (
+                <PressableScale
+                  onPress={resetController}
+                  accessibilityRole="button"
+                  accessibilityLabel="Reiniciar el equipo simulado"
+                  style={[styles.resetButton, { backgroundColor: theme.criticalSoft }]}>
+                  <ThemedText type="caption" style={[styles.resetLabel, { color: theme.critical }]}>
+                    Reiniciar equipo (botón reset del Arduino)
+                  </ThemedText>
+                </PressableScale>
+              )}
             </>
           )}
         </Animated.View>
@@ -384,7 +443,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 16,
-    paddingVertical: 14,
+    paddingVertical: 9,
   },
   sectionRowText: {
     flex: 1,
@@ -441,6 +500,18 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   segmentLabel: {
+    fontWeight: '600',
+  },
+  groupLabel: {
+    paddingTop: 14,
+  },
+  resetButton: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: Radius.md,
+    marginTop: 6,
+  },
+  resetLabel: {
     fontWeight: '600',
   },
   statusRow: {

@@ -5,26 +5,17 @@
  * endpoint del dispositivo) viven acá para poder ajustarlos sin tocar la UI.
  */
 
-/** Capacidad inicial del tanque, en litros. */
-export const DEFAULT_TANK_CAPACITY_LITERS = 1000;
+/** Capacidad inicial del tanque, en litros (caso de diseño del informe: 500 L). */
+export const DEFAULT_TANK_CAPACITY_LITERS = 500;
 
 export const MIN_TANK_CAPACITY_LITERS = 50;
 export const MAX_TANK_CAPACITY_LITERS = 100000;
 
-/** Intervalo con el que el simulador publica una medición nueva. */
+/** Intervalo con el que el simulador publica una medición cuando el nivel está quieto. */
 export const MOCK_UPDATE_INTERVAL_MS = 2000;
 
 /** Nivel con el que arranca el simulador (%). */
 export const MOCK_INITIAL_LEVEL_PERCENT = 68;
-
-/** Simulación de llenado (botón "Simular"): tiempo con el tanque vacío antes de empezar. */
-export const FILL_SIMULATION_EMPTY_HOLD_MS = 3000;
-
-/** Duración del llenado completo, de 0% a 100%. */
-export const FILL_SIMULATION_DURATION_MS = 45_000;
-
-/** Durante la simulación las mediciones son más frecuentes para que el llenado se vea fluido. */
-export const FILL_SIMULATION_UPDATE_INTERVAL_MS = 500;
 
 /** Intervalo de consulta al dispositivo real. */
 export const DEVICE_POLL_INTERVAL_MS = 3000;
@@ -65,3 +56,48 @@ export const LEVEL_CRITICAL_PERCENT = 10;
 export const LEVEL_LOW_PERCENT = 20;
 export const LEVEL_FULL_PERCENT = 90;
 export const LEVEL_HYSTERESIS_PERCENT = 2;
+
+/**
+ * Control de llenado (mismos valores que el firmware con `SIMULACION 1`).
+ *
+ * La bomba arranca cuando el nivel baja a `LEVEL_LOW_PERCENT` y la cisterna
+ * tiene agua, y corta al llegar a `LEVEL_FULL_PERCENT`.
+ */
+export const FILL_CONTROL = {
+  /** La señal de la cisterna tiene que estar estable este tiempo. */
+  cisternDebounceMs: 2000,
+  /** Tiempo mínimo con la bomba apagada antes de volver a arrancar. */
+  minOffMs: 5000,
+  /** Cada cuánto se exige que el nivel haya subido. */
+  verifyIntervalMs: 20_000,
+  /** Subida mínima (en puntos %) en cada intervalo de verificación. */
+  minRisePercent: 2,
+  /** Corte de seguridad por tiempo de llenado. */
+  maxFillMs: 180_000,
+  /** Espera antes de reintentar después de una falla. */
+  retryDelayMs: 30_000,
+  /** Fallas seguidas antes de bloquear. */
+  maxRetries: 3,
+} as const;
+
+/** Simulador: velocidad de llenado de la bomba (% por segundo). */
+export const SIM_PUMP_RATE_PERCENT_PER_S = 2.2;
+
+/** Simulador: consumo normal de la casa (% por segundo). */
+export const SIM_CONSUMPTION_PERCENT_PER_S = 0.04;
+
+/** Simulador: consumo del botón "Vaciar" (% por segundo). */
+export const SIM_DRAIN_PERCENT_PER_S = 6;
+
+/** Simulador: nivel en el que se corta el vaciado rápido. */
+export const SIM_DRAIN_TARGET_PERCENT = 4;
+
+/** Simulador: paso de la física y de las mediciones mientras hay movimiento. */
+export const SIM_TICK_MS = 500;
+
+/** Historial: cada cuánto se guarda un punto y cuántos se conservan (~30 min). */
+export const HISTORY_SAMPLE_INTERVAL_MS = 5000;
+export const HISTORY_MAX_POINTS = 360;
+
+/** Registro de eventos: cantidad máxima conservada. */
+export const EVENT_LOG_MAX = 60;

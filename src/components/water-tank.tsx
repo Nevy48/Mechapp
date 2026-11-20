@@ -44,6 +44,8 @@ const AnimatedG = Animated.createAnimatedComponent(G);
 /** Ancho máximo del tanque: nunca debe dominar más que la pantalla. */
 const MAX_TANK_WIDTH = 320;
 const HORIZONTAL_INSET = 24;
+/** Tamaño mínimo: evita medidas negativas antes de conocer el layout. */
+const MIN_TANK_WIDTH = 120;
 /** Relación entre el alto y el ancho del tanque. */
 const TANK_ASPECT = 1.12;
 /** Espacio bajo el tanque para la sombra de apoyo. */
@@ -94,6 +96,13 @@ export type WaterTankProps = {
   /** Si está definido, el nivel se puede arrastrar con el dedo (modo simulado). */
   onLevelChange?: (levelPercent: number) => void;
   onDragStart?: () => void;
+  /**
+   * Alto disponible para el tanque. Si está definido, el tanque se achica
+   * para entrar en ese alto y no tapar el resto de la pantalla.
+   */
+  maxHeight?: number;
+  /** Ancho disponible (medido por el contenedor). Si falta, se usa el de la pantalla. */
+  maxWidth?: number;
 };
 
 /** Contorno del hombro y el cuerpo (sin la tapa): también recorta el agua. */
@@ -192,14 +201,22 @@ export function WaterTank({
   isTurbulent = false,
   onLevelChange,
   onDragStart,
+  maxHeight,
+  maxWidth,
 }: WaterTankProps) {
   const theme = useTheme();
   const { width: screenWidth } = useWindowDimensions();
 
   const size = useMemo(() => {
-    const width = Math.min(screenWidth - HORIZONTAL_INSET * 2, MAX_TANK_WIDTH);
+    const available =
+      maxWidth !== undefined && maxWidth > 0 ? maxWidth : screenWidth - HORIZONTAL_INSET * 2;
+    let width = Math.min(available, MAX_TANK_WIDTH);
+    if (maxHeight !== undefined && maxHeight > 0) {
+      width = Math.min(width, (maxHeight - SHADOW_SPACE) / TANK_ASPECT);
+    }
+    width = Math.max(MIN_TANK_WIDTH, Math.round(width));
     return { width, height: Math.round(width * TANK_ASPECT) };
-  }, [screenWidth]);
+  }, [screenWidth, maxHeight, maxWidth]);
 
   const bodyPath = useMemo(() => buildBodyPath(size.width, size.height), [size]);
 

@@ -2,11 +2,20 @@ import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Radius } from '@/constants/theme';
-import type { LevelAlert } from '@/data/tank';
+import type { FillControlState, LevelAlert } from '@/data/tank';
 import { useTheme } from '@/hooks/use-theme';
 import type { TankTrend } from '@/providers/tank-provider';
 
-export type TankStatusKey = 'full' | 'optimal' | 'filling' | 'dropping' | 'low' | 'critical';
+export type TankStatusKey =
+  | 'full'
+  | 'optimal'
+  | 'filling'
+  | 'pumping'
+  | 'waiting'
+  | 'fault'
+  | 'dropping'
+  | 'low'
+  | 'critical';
 
 export type TankStatus = {
   key: TankStatusKey;
@@ -15,8 +24,11 @@ export type TankStatus = {
 
 /**
  * Estado del tanque. Los umbrales salen de la alerta del firmware
- * (`getLevelAlert`); la tendencia agrega los matices.
+ * (`getLevelAlert`); el control de llenado y la tendencia agregan los matices.
  *
+ * - Falla en el llenado: el control cortó por una falla o está bloqueado.
+ * - Llenando con la bomba: el relé está cerrado.
+ * - Esperando la cisterna: hace falta llenar pero la cisterna no tiene agua.
  * - Tanque lleno: alerta "lleno".
  * - Nivel crítico: alerta "crítico".
  * - Se está llenando: el nivel sube (por encima del nivel crítico).
@@ -24,7 +36,20 @@ export type TankStatus = {
  * - El nivel está bajando: todavía hay agua, pero se está consumiendo.
  * - Nivel óptimo: hay agua de sobra.
  */
-export function getTankStatus(alert: LevelAlert | null, trend: TankTrend): TankStatus {
+export function getTankStatus(
+  alert: LevelAlert | null,
+  trend: TankTrend,
+  control: FillControlState | null = null
+): TankStatus {
+  if (control?.fillState === 'fault' || control?.fillState === 'locked') {
+    return { key: 'fault', label: 'Falla en el llenado' };
+  }
+  if (control?.pumpOn) {
+    return { key: 'pumping', label: 'Llenando con la bomba' };
+  }
+  if (control?.fillState === 'waitingCistern') {
+    return { key: 'waiting', label: 'Esperando la cisterna' };
+  }
   if (alert === 'full') {
     return { key: 'full', label: 'Tanque lleno' };
   }
@@ -46,16 +71,20 @@ export function getTankStatus(alert: LevelAlert | null, trend: TankTrend): TankS
 export type TankStatusBadgeProps = {
   alert: LevelAlert | null;
   trend: TankTrend;
+  control?: FillControlState | null;
 };
 
-export function TankStatusBadge({ alert, trend }: TankStatusBadgeProps) {
+export function TankStatusBadge({ alert, trend, control = null }: TankStatusBadgeProps) {
   const theme = useTheme();
-  const status = getTankStatus(alert, trend);
+  const status = getTankStatus(alert, trend, control);
 
   const palette: Record<TankStatusKey, { color: string; background: string }> = {
     full: { color: theme.positive, background: theme.positiveSoft },
     optimal: { color: theme.accentText, background: theme.accentSoft },
     filling: { color: theme.accentText, background: theme.accentSoft },
+    pumping: { color: theme.accentText, background: theme.accentSoft },
+    waiting: { color: theme.caution, background: theme.cautionSoft },
+    fault: { color: theme.critical, background: theme.criticalSoft },
     dropping: { color: theme.caution, background: theme.cautionSoft },
     low: { color: theme.caution, background: theme.cautionSoft },
     critical: { color: theme.critical, background: theme.criticalSoft },

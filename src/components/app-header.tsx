@@ -1,4 +1,5 @@
 import { StyleSheet, View } from 'react-native';
+import Svg, { Circle, Path } from 'react-native-svg';
 
 import { ConnectionPill } from '@/components/connection-pill';
 import { GlassSurface } from '@/components/glass-surface';
@@ -6,13 +7,34 @@ import { PressableScale } from '@/components/pressable-scale';
 import { ThemedText } from '@/components/themed-text';
 import { TuneIcon } from '@/components/tune-icon';
 import { Radius } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import { useTank } from '@/providers/tank-provider';
 
 export type AppHeaderProps = {
   onOpenSettings: () => void;
+  onOpenHistory: () => void;
 };
 
-export function AppHeader({ onOpenSettings }: AppHeaderProps) {
+/** Reloj con flecha: historial. */
+function HistoryIcon({ size = 18 }: { size?: number }) {
+  const theme = useTheme();
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M3.5 12 a8.5 8.5 0 1 0 2.5 -6"
+        stroke={theme.text}
+        strokeWidth={1.9}
+        strokeLinecap="round"
+        fill="none"
+      />
+      <Path d="M3 3.5 V7.5 H7" stroke={theme.text} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <Path d="M12 7.5 V12 L15 14" stroke={theme.text} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <Circle cx={12} cy={12} r={0.6} fill={theme.text} />
+    </Svg>
+  );
+}
+
+export function AppHeader({ onOpenSettings, onOpenHistory }: AppHeaderProps) {
   const { mode, status } = useTank();
 
   return (
@@ -32,6 +54,16 @@ export function AppHeader({ onOpenSettings }: AppHeaderProps) {
         <GlassSurface style={styles.pill}>
           <ConnectionPill status={status} />
         </GlassSurface>
+
+        <PressableScale
+          onPress={onOpenHistory}
+          accessibilityRole="button"
+          accessibilityLabel="Historial"
+          style={styles.iconButton}>
+          <GlassSurface style={styles.iconSurface}>
+            <HistoryIcon />
+          </GlassSurface>
+        </PressableScale>
 
         <PressableScale
           onPress={onOpenSettings}

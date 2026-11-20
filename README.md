@@ -9,7 +9,29 @@ La pantalla principal muestra, de un vistazo:
 
 1. Qué porcentaje del tanque está lleno.
 2. Cuántos litros quedan disponibles.
-3. Si el sensor está conectado y si la medición es actual.
+3. Si la bomba está encendida y si la cisterna tiene agua.
+4. Avisos del control de llenado: cisterna vacía, falla o bloqueo.
+5. Si el sensor está conectado y si la medición es actual.
+
+El botón del reloj abre el **historial** de la sesión: gráfico de nivel con las
+franjas en las que funcionó la bomba, resumen (llenados, tiempo de bomba, nivel
+mínimo, fallas) y registro de eventos.
+
+## Control de llenado
+
+El equipo no sólo mide: comanda el llenado actuando sobre el circuito del
+automático del tanque, y sólo da la orden si el automático de la cisterna
+confirma que hay agua (firmware `control_llenado.ino`). La app muestra ese
+estado y, en modo simulado, corre **la misma máquina de estados** que el
+firmware (`src/data/tank/fill-controller.ts`):
+
+| Estado (`llenado`) | En la app | Qué pasa |
+|---|---|---|
+| `REPOSO` | En reposo | Hay agua suficiente, la bomba está apagada. |
+| `LLENANDO` | Llenando con la bomba | Nivel ≤ 20 % y cisterna con agua: el relé cierra. Corta al 90 %. |
+| `ESPERA_CISTERNA` | Esperando la cisterna | Hace falta llenar pero la cisterna está vacía. |
+| `FALLA` | Falla en el llenado | El nivel no subió (`SIN_CAUDAL`), se pasó el tiempo máximo (`TIEMPO_MAX`) o falló el sensor (`SENSOR`). Reintenta solo. |
+| `BLOQUEO` | Llenado bloqueado | Tres fallas seguidas: hay que reiniciar el equipo. |
 
 ## Puesta en marcha
 
@@ -95,17 +117,34 @@ sigue funcionando con datos simulados.
 
 ### Formato de la respuesta
 
+La app acepta la trama del firmware tal cual sale por el puerto serie:
+
+```json
+{"id":"T1","nivel":15,"litros":75,"dist_cm":95,"alerta":"BAJO",
+ "cisterna":"CON_AGUA","bomba":"ON","llenado":"LLENANDO","falla":"-"}
+```
+
+o el formato de la API:
+
 ```json
 {
   "levelPercent": 68.4,
   "distanceCm": 51.6,
-  "timestamp": 1720000000000
+  "timestamp": 1720000000000,
+  "pumpOn": false,
+  "cisternHasWater": true,
+  "fillState": "idle",
+  "fault": null
 }
 ```
 
-- `levelPercent` (obligatorio): porcentaje de agua, entre 0 y 100.
-- `distanceCm` (opcional): distancia del sensor a la superficie del agua, en cm.
+- `levelPercent` / `nivel` (obligatorio): porcentaje de agua, entre 0 y 100.
+- `distanceCm` / `dist_cm` (opcional): distancia del sensor a la superficie, en cm.
 - `timestamp` (opcional): epoch en ms; si falta, se usa la hora de recepción.
+- `bomba` / `pumpOn`, `cisterna` / `cisternHasWater`, `llenado` / `fillState`,
+  `falla` / `fault` (opcionales): estado del control de llenado. Si el equipo no
+  los manda (firmware anterior), la app funciona como monitor de nivel y oculta
+  el panel de bomba y cisterna.
 
 Cualquier valor fuera de rango se descarta: la UI nunca muestra una medición
 inválida. Ante dos respuestas fallidas consecutivas la app pasa a "Sin conexión",
@@ -121,15 +160,27 @@ app no cambia.
 
 El botón de la esquina superior derecha abre un sheet con:
 
-- **Capacidad del tanque**: se define en litros (1.000 L por defecto). Cambia los
-  litros calculados, no el nivel medido.
+- **Capacidad del tanque**: se define en litros (500 L por defecto, como el caso
+  de diseño). Cambia los litros calculados, no el nivel medido.
 - **Modo de conexión**: simulación o dispositivo real.
-- **Estado de la conexión**: estado actual y última medición válida.
+- **Estado de la conexión**: estado actual, última medición válida y estado del
+  control de llenado.
+- **Pruebas de la simulación** (sólo modo simulado): automático de la cisterna,
+  bomba sin caudal (para probar fallas y bloqueo), corte de conexión y, cuando
+  hay falla, el reinicio del equipo.
+
+En el dashboard simulado, el botón **Vaciar** simula un consumo fuerte: el
+tanque baja rápido y el control arranca la bomba solo. También se puede
+arrastrar el agua para fijar el nivel a mano.
 
 ## Notas del prototipo
 
 - La capacidad se mantiene en memoria: se reinicia con la app. Para persistirla
   hace falta agregar un almacenamiento local (por ejemplo
   `@react-native-async-storage/async-storage`).
+- El historial y los eventos viven en memoria (unos 30 min): se borran al cerrar
+  la app o cambiar de modo.
+- Las notificaciones push (nivel crítico, cisterna vacía, falla) quedan para la
+  versión con servidor: hoy los avisos se ven dentro de la app.
 - Las mediciones simuladas están rotuladas como "Simulado" en el encabezado para
   que nunca se confundan con datos de un sensor real.

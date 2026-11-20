@@ -4,7 +4,9 @@ import type { TankDataSource, TankSourceMode } from './types';
 
 export * from './types';
 export * from './alert';
-export { HttpTankSource, parseDevicePayload } from './http-source';
+export * from './fill-state';
+export { FillController } from './fill-controller';
+export { HttpTankSource, parseControl, parseDevicePayload } from './http-source';
 export { MockTankSource } from './mock-source';
 
 /**
