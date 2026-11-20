@@ -96,6 +96,8 @@ export type WaterTankProps = {
   /** Si está definido, el nivel se puede arrastrar con el dedo (modo simulado). */
   onLevelChange?: (levelPercent: number) => void;
   onDragStart?: () => void;
+  /** Se llama al soltar el agua. */
+  onDragEnd?: () => void;
   /**
    * Alto disponible para el tanque. Si está definido, el tanque se achica
    * para entrar en ese alto y no tapar el resto de la pantalla.
@@ -201,6 +203,7 @@ export function WaterTank({
   isTurbulent = false,
   onLevelChange,
   onDragStart,
+  onDragEnd,
   maxHeight,
   maxWidth,
 }: WaterTankProps) {
@@ -239,9 +242,13 @@ export function WaterTank({
   const alertIndex = useSharedValue(ALERT_ORDER.indexOf(alert ?? 'ok'));
 
   const [isDragging, setIsDragging] = useState(false);
-  /** Estado del arrastre: nivel al empezar, y último nivel publicado. */
-  const dragStart = useSharedValue(0);
+  /** Estado del arrastre: referencia (dedo, nivel, recorrido) y último nivel publicado. */
+  const dragAnchorDy = useSharedValue(0);
+  const dragAnchorLevel = useSharedValue(0);
+  const dragAnchorTravel = useSharedValue(1);
   const dragEmitted = useSharedValue(0);
+  /** Recorrido actual del agua; lo lee el arrastre sin tener que recrearse. */
+  const travelValue = useSharedValue(1);
 
   useEffect(() => {
     // Mientras se arrastra, el agua sigue al dedo: las mediciones no la mueven.
@@ -357,14 +364,22 @@ export function WaterTank({
 
   const isDraggable = Boolean(onLevelChange);
 
+  useEffect(() => {
+    travelValue.set(travel);
+  }, [travel, travelValue]);
+
   /**
    * Arrastre vertical sobre el tanque: el agua sigue al dedo y el nivel se
    * publica a la fuente simulada, como si lo midiera el sensor.
+   *
+   * No depende del tamaño del tanque: si se recreara en medio del gesto (por
+   * ejemplo, porque el tanque cambió de tamaño), el arrastre se reiniciaría.
    */
   const panResponder = useMemo(() => {
     const finish = () => {
       setIsDragging(false);
       onLevelChange?.(level.get());
+      onDragEnd?.();
     };
 
     return PanResponder.create({
@@ -373,13 +388,24 @@ export function WaterTank({
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: () => {
         cancelAnimation(level);
-        dragStart.set(level.get());
+        dragAnchorDy.set(0);
+        dragAnchorLevel.set(level.get());
+        dragAnchorTravel.set(travelValue.get());
         dragEmitted.set(level.get());
         setIsDragging(true);
         onDragStart?.();
       },
       onPanResponderMove: (_, gesture) => {
-        const next = clampLevelPercent(dragStart.get() - (gesture.dy / travel) * 100);
+        // Si el tanque cambió de tamaño, el nivel actual pasa a ser la nueva
+        // referencia, así el agua no salta.
+        if (travelValue.get() !== dragAnchorTravel.get()) {
+          dragAnchorLevel.set(level.get());
+          dragAnchorDy.set(gesture.dy);
+          dragAnchorTravel.set(travelValue.get());
+        }
+        const next = clampLevelPercent(
+          dragAnchorLevel.get() - ((gesture.dy - dragAnchorDy.get()) / dragAnchorTravel.get()) * 100
+        );
         level.set(next);
         if (Math.abs(next - dragEmitted.get()) >= DRAG_EMIT_STEP_PERCENT) {
           dragEmitted.set(next);
@@ -389,7 +415,18 @@ export function WaterTank({
       onPanResponderRelease: finish,
       onPanResponderTerminate: finish,
     });
-  }, [isDraggable, level, dragStart, dragEmitted, travel, onLevelChange, onDragStart]);
+  }, [
+    isDraggable,
+    level,
+    dragAnchorDy,
+    dragAnchorLevel,
+    dragAnchorTravel,
+    dragEmitted,
+    travelValue,
+    onLevelChange,
+    onDragStart,
+    onDragEnd,
+  ]);
 
   const handleAccessibilityAction = (event: AccessibilityActionEvent) => {
     const step =

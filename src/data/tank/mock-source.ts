@@ -10,7 +10,7 @@ import {
   SIM_TICK_MS,
 } from '@/constants/config';
 
-import { FillController } from './fill-controller';
+import { DEFAULT_FILL_CONFIG, FillController } from './fill-controller';
 import {
   clampLevelPercent,
   type ConnectionStatus,
@@ -84,7 +84,11 @@ export class MockTankSource implements TankDataSource {
   private level = MOCK_INITIAL_LEVEL_PERCENT;
   private draining = false;
   private controls: SimulationControls = { cisternHasWater: true, pumpFailure: false };
-  private controller = new FillController();
+  /**
+   * Sin antirrebote de la cisterna: en el simulador el cambio lo hace el
+   * usuario a mano, así que se aplica al instante.
+   */
+  private controller = new FillController({ ...DEFAULT_FILL_CONFIG, cisternDebounceMs: 0 });
   private control: FillControlState = this.controller.snapshot();
 
   subscribe(listener: (event: TankSourceEvent) => void): () => void {
@@ -168,6 +172,8 @@ export class MockTankSource implements TankDataSource {
 
   setCisternWater(hasWater: boolean): void {
     this.setControls({ ...this.controls, cisternHasWater: hasWater });
+    // Se recalcula ya, sin esperar al próximo paso de la simulación.
+    this.tick(true);
   }
 
   setPumpFailure(failure: boolean): void {

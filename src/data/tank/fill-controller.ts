@@ -10,13 +10,13 @@ export interface FillControllerInput {
   cisternRaw: boolean;
 }
 
-export type FillControllerConfig = typeof FILL_CONTROL & {
+export type FillControllerConfig = { [K in keyof typeof FILL_CONTROL]: number } & {
   lowPercent: number;
   fullPercent: number;
   hysteresisPercent: number;
 };
 
-const DEFAULT_CONFIG: FillControllerConfig = {
+export const DEFAULT_FILL_CONFIG: FillControllerConfig = {
   ...FILL_CONTROL,
   lowPercent: LEVEL_LOW_PERCENT,
   fullPercent: LEVEL_FULL_PERCENT,
@@ -52,7 +52,7 @@ export class FillController {
   private consecutiveFaults = 0;
   private sensorOk = true;
 
-  constructor(private readonly config: FillControllerConfig = DEFAULT_CONFIG) {}
+  constructor(private readonly config: FillControllerConfig = DEFAULT_FILL_CONFIG) {}
 
   /** Equivale a apretar el botón de reset del Arduino. */
   reset(now: number): void {

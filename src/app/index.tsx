@@ -35,12 +35,20 @@ export default function DashboardScreen() {
     stopDrain,
     setManualLevel,
     resetController,
+    simulationControls,
+    setCisternWater,
   } = useTank();
   const [settingsVisible, setSettingsVisible] = useState(false);
   /** La pista de "arrastrá" se muestra hasta que se usa una vez. */
   const [hasDragged, setHasDragged] = useState(false);
   const isSimulated = mode === 'simulated';
-  const handleDragStart = useCallback(() => setHasDragged(true), []);
+  const [isTankDragging, setIsTankDragging] = useState(false);
+  const handleDragStart = useCallback(() => setIsTankDragging(true), []);
+  const handleDragEnd = useCallback(() => {
+    setIsTankDragging(false);
+    // La pista se oculta al soltar, para no achicar el tanque en pleno arrastre.
+    setHasDragged(true);
+  }, []);
   const openHistory = useCallback(() => router.push('/history'), []);
   /** Alto real del área del tanque: el tanque se ajusta para no tapar el encabezado. */
   const [tankArea, setTankArea] = useState<{ width: number; height: number } | null>(null);
@@ -52,7 +60,17 @@ export default function DashboardScreen() {
 
   const levelPercent = reading?.levelPercent ?? 0;
   const liters = reading ? remainingLiters(reading.levelPercent, capacityLiters) : 0;
-  const notice = getControlNotice(control);
+  const liveNotice = getControlNotice(control);
+  /**
+   * Mientras se arrastra el agua, el aviso del control queda congelado: si
+   * apareciera o desapareciera, el tanque cambiaría de tamaño bajo el dedo.
+   * Se actualiza al soltar.
+   */
+  const [shownNotice, setShownNotice] = useState(liveNotice);
+  if (!isTankDragging && shownNotice?.title !== liveNotice?.title) {
+    setShownNotice(liveNotice);
+  }
+  const notice = isTankDragging ? shownNotice : liveNotice;
   // En el equipo real el bloqueo se resuelve con el reset del Arduino; en la
   // simulación se ofrece el botón para probar el flujo completo.
   const canReset = isSimulated && control?.fillState === 'locked';
@@ -100,6 +118,7 @@ export default function DashboardScreen() {
               isTurbulent={isDrainRunning || (control?.pumpOn ?? false)}
               onLevelChange={isSimulated && !isStale ? setManualLevel : undefined}
               onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
               maxWidth={tankArea.width}
               maxHeight={tankArea.height - TANK_AREA_PADDING * 2 - (showHint ? HINT_SPACE : 0)}
             />
@@ -133,7 +152,15 @@ export default function DashboardScreen() {
         </Animated.View>
 
         <Animated.View entering={FadeIn.duration(700).delay(470)} style={styles.systemArea}>
-          <SystemPanel control={control} isStale={isStale} />
+          <SystemPanel
+            control={control}
+            isStale={isStale}
+            onCisternPress={
+              mode === 'simulated'
+                ? () => setCisternWater(!(simulationControls?.cisternHasWater ?? true))
+                : undefined
+            }
+          />
         </Animated.View>
 
         <Animated.View entering={FadeIn.duration(700).delay(520)} style={styles.footer}>

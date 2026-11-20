@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Modal,
-  PanResponder,
   Pressable,
   StyleSheet,
   Switch,
@@ -9,6 +8,7 @@ import {
   View,
   type LayoutChangeEvent,
 } from 'react-native';
+import { GestureDetector, GestureHandlerRootView, usePanGesture } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
@@ -85,6 +85,7 @@ export function SettingsSheet({ visible, onClose }: SettingsSheetProps) {
   }, [mode, segmentWidth, indicatorX]);
 
   const dismiss = useCallback(() => {
+    'worklet';
     progress.set(
       withTiming(0, { duration: 240, easing: Easing.out(Easing.quad) }, (finished) => {
         if (finished) {
@@ -95,34 +96,24 @@ export function SettingsSheet({ visible, onClose }: SettingsSheetProps) {
   }, [onClose, progress]);
 
   /**
-   * Arrastre hacia abajo en cualquier parte del sheet. Se captura antes que los
-   * hijos (botones, switch) para que un deslizamiento que empieza sobre ellos
-   * también cierre el sheet; los toques simples no se mueven y siguen llegando.
+   * Arrastre hacia abajo en cualquier parte del sheet. Sólo se activa al
+   * deslizar hacia abajo (y falla con movimientos horizontales), así los
+   * toques en botones y switches siguen funcionando normalmente.
    */
-  const panResponder = useMemo(() => {
-    const isDownwardDrag = (_: unknown, gesture: { dx: number; dy: number }) =>
-      gesture.dy > 6 && Math.abs(gesture.dy) > Math.abs(gesture.dx);
-
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: isDownwardDrag,
-      onMoveShouldSetPanResponderCapture: isDownwardDrag,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderMove: (_, gesture) => {
-        dragY.set(Math.max(0, gesture.dy));
-      },
-      onPanResponderRelease: (_, gesture) => {
-        if (gesture.dy > 120 || gesture.vy > 0.9) {
-          dismiss();
-          return;
-        }
-        dragY.set(withSpring(0, { damping: 20, stiffness: 220, mass: 0.8 }));
-      },
-      onPanResponderTerminate: () => {
-        dragY.set(withSpring(0, { damping: 20, stiffness: 220, mass: 0.8 }));
-      },
-    });
-  }, [dismiss, dragY]);
+  const panGesture = usePanGesture({
+    activeOffsetY: 8,
+    failOffsetX: [-16, 16],
+    onUpdate: (event) => {
+      dragY.set(Math.max(0, event.translationY));
+    },
+    onDeactivate: (event) => {
+      if (!event.canceled && (event.translationY > 120 || event.velocityY > 900)) {
+        dismiss();
+        return;
+      }
+      dragY.set(withSpring(0, { damping: 20, stiffness: 220, mass: 0.8 }));
+    },
+  });
 
   const sheetStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: (1 - progress.value) * sheetHeight.value + dragY.value }],
@@ -177,7 +168,7 @@ export function SettingsSheet({ visible, onClose }: SettingsSheetProps) {
       animationType="none"
       statusBarTranslucent
       onRequestClose={dismiss}>
-      <View style={styles.root}>
+      <GestureHandlerRootView style={styles.root}>
         <Animated.View
           style={[StyleSheet.absoluteFill, { backgroundColor: theme.scrim }, scrimStyle]}>
           <Pressable
@@ -188,223 +179,224 @@ export function SettingsSheet({ visible, onClose }: SettingsSheetProps) {
           />
         </Animated.View>
 
-        <Animated.View
-          {...panResponder.panHandlers}
-          onLayout={handleSheetLayout}
-          style={[
-            styles.sheet,
-            {
-              backgroundColor: theme.surface,
-              paddingBottom: insets.bottom + 20,
-            },
-            sheetStyle,
-          ]}>
-          <View style={styles.grabArea}>
-            <View style={[styles.grabber, { backgroundColor: theme.hairline }]} />
-            <ThemedText type="headline" style={styles.title}>
-              Configuración
-            </ThemedText>
-          </View>
-
-          <View style={styles.section}>
-            <ThemedText type="label" themeColor="textTertiary">
-              Capacidad del tanque
-            </ThemedText>
-
-            <View style={styles.capacityRow}>
-              <PressableScale
-                onPress={() => setCapacityLiters(capacityLiters - CAPACITY_STEP)}
-                accessibilityRole="button"
-                accessibilityLabel="Reducir capacidad"
-                style={styles.stepButton}>
-                <ThemedText type="headline" themeColor="textSecondary">
-                  −
-                </ThemedText>
-              </PressableScale>
-
-              <View style={styles.capacityField}>
-                <TextInput
-                  value={displayCapacity}
-                  onChangeText={(text) => setDraft(text.replace(/[^0-9]/g, ''))}
-                  onFocus={() => setDraft(String(capacityLiters))}
-                  onBlur={() => {
-                    if (draft !== null) commitCapacity(draft);
-                    setDraft(null);
-                  }}
-                  keyboardType="number-pad"
-                  selectTextOnFocus
-                  maxLength={6}
-                  style={[styles.capacityInput, { color: theme.text }]}
-                  accessibilityLabel="Capacidad del tanque en litros"
-                />
-                <ThemedText type="headline" themeColor="textTertiary">
-                  L
-                </ThemedText>
-              </View>
-
-              <PressableScale
-                onPress={() => setCapacityLiters(capacityLiters + CAPACITY_STEP)}
-                accessibilityRole="button"
-                accessibilityLabel="Aumentar capacidad"
-                style={styles.stepButton}>
-                <ThemedText type="headline" themeColor="textSecondary">
-                  +
-                </ThemedText>
-              </PressableScale>
+        <GestureDetector gesture={panGesture}>
+          <Animated.View
+            onLayout={handleSheetLayout}
+            style={[
+              styles.sheet,
+              {
+                backgroundColor: theme.surface,
+                paddingBottom: insets.bottom + 20,
+              },
+              sheetStyle,
+            ]}>
+            <View style={styles.grabArea}>
+              <View style={[styles.grabber, { backgroundColor: theme.hairline }]} />
+              <ThemedText type="headline" style={styles.title}>
+                Configuración
+              </ThemedText>
             </View>
 
-            <ThemedText type="caption" themeColor="textTertiary">
-              Cambia los litros calculados. El nivel medido no se modifica.
-            </ThemedText>
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: theme.hairline }]} />
-
-          <View style={styles.section}>
-            <ThemedText type="label" themeColor="textTertiary">
-              Modo de conexión
-            </ThemedText>
-
-            <View
-              onLayout={handleSegmentLayout}
-              style={[styles.segmented, { backgroundColor: theme.surfaceMuted }]}>
-              <Animated.View
-                style={[
-                  styles.segmentIndicator,
-                  { width: segmentWidth, backgroundColor: theme.surface },
-                  indicatorStyle,
-                ]}
-              />
-              <Pressable
-                style={styles.segment}
-                onPress={() => setMode('simulated')}
-                accessibilityRole="button"
-                accessibilityState={{ selected: mode === 'simulated' }}>
-                <ThemedText
-                  type="caption"
-                  themeColor={mode === 'simulated' ? 'text' : 'textSecondary'}
-                  style={styles.segmentLabel}>
-                  Simulación
-                </ThemedText>
-              </Pressable>
-              <Pressable
-                style={styles.segment}
-                onPress={() => setMode('device')}
-                disabled={!isDeviceAvailable}
-                accessibilityRole="button"
-                accessibilityState={{
-                  selected: mode === 'device',
-                  disabled: !isDeviceAvailable,
-                }}>
-                <ThemedText
-                  type="caption"
-                  themeColor={
-                    mode === 'device'
-                      ? 'text'
-                      : isDeviceAvailable
-                        ? 'textSecondary'
-                        : 'textTertiary'
-                  }
-                  style={styles.segmentLabel}>
-                  Dispositivo
-                </ThemedText>
-              </Pressable>
-            </View>
-
-            <ThemedText type="caption" themeColor="textTertiary">
-              {modeDescription}
-            </ThemedText>
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: theme.hairline }]} />
-
-          <View style={styles.section}>
-            <ThemedText type="label" themeColor="textTertiary">
-              Estado de la conexión
-            </ThemedText>
-
-            <View style={styles.statusRow}>
-              <ConnectionPill status={status} />
-              {statusDetail ? (
-                <ThemedText type="caption" themeColor="textTertiary">
-                  {statusDetail}
-                </ThemedText>
-              ) : null}
-            </View>
-
-            <ThemedText type="caption" themeColor="textTertiary">
-              Última medición: {lastReading}
-            </ThemedText>
-            <ThemedText type="caption" themeColor="textTertiary">
-              Control de llenado: {controlSummary}
-            </ThemedText>
-          </View>
-
-          {mode === 'simulated' && (
-            <>
-              <View style={[styles.divider, { backgroundColor: theme.hairline }]} />
-
-              <ThemedText type="label" themeColor="textTertiary" style={styles.groupLabel}>
-                Pruebas de la simulación
+            <View style={styles.section}>
+              <ThemedText type="label" themeColor="textTertiary">
+                Capacidad del tanque
               </ThemedText>
 
-              <View style={styles.sectionRow}>
-                <View style={styles.sectionRowText}>
-                  <ThemedText type="default">Cisterna con agua</ThemedText>
-                  <ThemedText type="caption" themeColor="textTertiary">
-                    Es el automático de la cisterna
-                  </ThemedText>
-                </View>
-                <Switch
-                  value={simulationControls?.cisternHasWater ?? true}
-                  onValueChange={setCisternWater}
-                  accessibilityLabel="Cisterna con agua"
-                />
-              </View>
-
-              <View style={styles.sectionRow}>
-                <View style={styles.sectionRowText}>
-                  <ThemedText type="default">Bomba sin caudal</ThemedText>
-                  <ThemedText type="caption" themeColor="textTertiary">
-                    Funciona pero no sube agua: prueba las fallas
-                  </ThemedText>
-                </View>
-                <Switch
-                  value={simulationControls?.pumpFailure ?? false}
-                  onValueChange={setPumpFailure}
-                  accessibilityLabel="Simular bomba sin caudal"
-                />
-              </View>
-
-              <View style={styles.sectionRow}>
-                <View style={styles.sectionRowText}>
-                  <ThemedText type="default">Simular corte de conexión</ThemedText>
-                  <ThemedText type="caption" themeColor="textTertiary">
-                    Prueba el estado "sin conexión"
-                  </ThemedText>
-                </View>
-                <Switch
-                  value={!isSimulatedOnline}
-                  onValueChange={(offline) => setSimulatedConnection(!offline)}
-                  accessibilityLabel="Simular corte de conexión"
-                />
-              </View>
-
-              {(control?.fillState === 'locked' || control?.fillState === 'fault') && (
+              <View style={styles.capacityRow}>
                 <PressableScale
-                  onPress={resetController}
+                  onPress={() => setCapacityLiters(capacityLiters - CAPACITY_STEP)}
                   accessibilityRole="button"
-                  accessibilityLabel="Reiniciar el equipo simulado"
-                  style={[styles.resetButton, { backgroundColor: theme.criticalSoft }]}>
-                  <ThemedText type="caption" style={[styles.resetLabel, { color: theme.critical }]}>
-                    Reiniciar equipo (botón reset del Arduino)
+                  accessibilityLabel="Reducir capacidad"
+                  style={styles.stepButton}>
+                  <ThemedText type="headline" themeColor="textSecondary">
+                    −
                   </ThemedText>
                 </PressableScale>
-              )}
-            </>
-          )}
-        </Animated.View>
-      </View>
+
+                <View style={styles.capacityField}>
+                  <TextInput
+                    value={displayCapacity}
+                    onChangeText={(text) => setDraft(text.replace(/[^0-9]/g, ''))}
+                    onFocus={() => setDraft(String(capacityLiters))}
+                    onBlur={() => {
+                      if (draft !== null) commitCapacity(draft);
+                      setDraft(null);
+                    }}
+                    keyboardType="number-pad"
+                    selectTextOnFocus
+                    maxLength={6}
+                    style={[styles.capacityInput, { color: theme.text }]}
+                    accessibilityLabel="Capacidad del tanque en litros"
+                  />
+                  <ThemedText type="headline" themeColor="textTertiary">
+                    L
+                  </ThemedText>
+                </View>
+
+                <PressableScale
+                  onPress={() => setCapacityLiters(capacityLiters + CAPACITY_STEP)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Aumentar capacidad"
+                  style={styles.stepButton}>
+                  <ThemedText type="headline" themeColor="textSecondary">
+                    +
+                  </ThemedText>
+                </PressableScale>
+              </View>
+
+              <ThemedText type="caption" themeColor="textTertiary">
+                Cambia los litros calculados. El nivel medido no se modifica.
+              </ThemedText>
+            </View>
+
+            <View style={[styles.divider, { backgroundColor: theme.hairline }]} />
+
+            <View style={styles.section}>
+              <ThemedText type="label" themeColor="textTertiary">
+                Modo de conexión
+              </ThemedText>
+
+              <View
+                onLayout={handleSegmentLayout}
+                style={[styles.segmented, { backgroundColor: theme.surfaceMuted }]}>
+                <Animated.View
+                  style={[
+                    styles.segmentIndicator,
+                    { width: segmentWidth, backgroundColor: theme.surface },
+                    indicatorStyle,
+                  ]}
+                />
+                <Pressable
+                  style={styles.segment}
+                  onPress={() => setMode('simulated')}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: mode === 'simulated' }}>
+                  <ThemedText
+                    type="caption"
+                    themeColor={mode === 'simulated' ? 'text' : 'textSecondary'}
+                    style={styles.segmentLabel}>
+                    Simulación
+                  </ThemedText>
+                </Pressable>
+                <Pressable
+                  style={styles.segment}
+                  onPress={() => setMode('device')}
+                  disabled={!isDeviceAvailable}
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    selected: mode === 'device',
+                    disabled: !isDeviceAvailable,
+                  }}>
+                  <ThemedText
+                    type="caption"
+                    themeColor={
+                      mode === 'device'
+                        ? 'text'
+                        : isDeviceAvailable
+                          ? 'textSecondary'
+                          : 'textTertiary'
+                    }
+                    style={styles.segmentLabel}>
+                    Dispositivo
+                  </ThemedText>
+                </Pressable>
+              </View>
+
+              <ThemedText type="caption" themeColor="textTertiary">
+                {modeDescription}
+              </ThemedText>
+            </View>
+
+            <View style={[styles.divider, { backgroundColor: theme.hairline }]} />
+
+            <View style={styles.section}>
+              <ThemedText type="label" themeColor="textTertiary">
+                Estado de la conexión
+              </ThemedText>
+
+              <View style={styles.statusRow}>
+                <ConnectionPill status={status} />
+                {statusDetail ? (
+                  <ThemedText type="caption" themeColor="textTertiary">
+                    {statusDetail}
+                  </ThemedText>
+                ) : null}
+              </View>
+
+              <ThemedText type="caption" themeColor="textTertiary">
+                Última medición: {lastReading}
+              </ThemedText>
+              <ThemedText type="caption" themeColor="textTertiary">
+                Control de llenado: {controlSummary}
+              </ThemedText>
+            </View>
+
+            {mode === 'simulated' && (
+              <>
+                <View style={[styles.divider, { backgroundColor: theme.hairline }]} />
+
+                <ThemedText type="label" themeColor="textTertiary" style={styles.groupLabel}>
+                  Pruebas de la simulación
+                </ThemedText>
+
+                <View style={styles.sectionRow}>
+                  <View style={styles.sectionRowText}>
+                    <ThemedText type="default">Cisterna con agua</ThemedText>
+                    <ThemedText type="caption" themeColor="textTertiary">
+                      Es el automático de la cisterna
+                    </ThemedText>
+                  </View>
+                  <Switch
+                    value={simulationControls?.cisternHasWater ?? true}
+                    onValueChange={setCisternWater}
+                    accessibilityLabel="Cisterna con agua"
+                  />
+                </View>
+
+                <View style={styles.sectionRow}>
+                  <View style={styles.sectionRowText}>
+                    <ThemedText type="default">Bomba sin caudal</ThemedText>
+                    <ThemedText type="caption" themeColor="textTertiary">
+                      Funciona pero no sube agua: prueba las fallas
+                    </ThemedText>
+                  </View>
+                  <Switch
+                    value={simulationControls?.pumpFailure ?? false}
+                    onValueChange={setPumpFailure}
+                    accessibilityLabel="Simular bomba sin caudal"
+                  />
+                </View>
+
+                <View style={styles.sectionRow}>
+                  <View style={styles.sectionRowText}>
+                    <ThemedText type="default">Simular corte de conexión</ThemedText>
+                    <ThemedText type="caption" themeColor="textTertiary">
+                      Prueba el estado "sin conexión"
+                    </ThemedText>
+                  </View>
+                  <Switch
+                    value={!isSimulatedOnline}
+                    onValueChange={(offline) => setSimulatedConnection(!offline)}
+                    accessibilityLabel="Simular corte de conexión"
+                  />
+                </View>
+
+                {(control?.fillState === 'locked' || control?.fillState === 'fault') && (
+                  <PressableScale
+                    onPress={resetController}
+                    accessibilityRole="button"
+                    accessibilityLabel="Reiniciar el equipo simulado"
+                    style={[styles.resetButton, { backgroundColor: theme.criticalSoft }]}>
+                    <ThemedText type="caption" style={[styles.resetLabel, { color: theme.critical }]}>
+                      Reiniciar equipo (botón reset del Arduino)
+                    </ThemedText>
+                  </PressableScale>
+                )}
+              </>
+            )}
+          </Animated.View>
+        </GestureDetector>
+      </GestureHandlerRootView>
     </Modal>
   );
 }

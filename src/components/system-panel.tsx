@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -20,6 +20,8 @@ export type SystemPanelProps = {
   control: FillControlState | null;
   /** Atenúa el panel cuando el dato no es en vivo. */
   isStale: boolean;
+  /** Si está, la tarjeta de la cisterna se puede tocar (simulación: alterna con agua / vacía). */
+  onCisternPress?: () => void;
 };
 
 /** Rotor de la bomba: gira mientras la bomba está encendida. */
@@ -99,7 +101,7 @@ function pumpDetail(control: FillControlState): string {
  * Estado de la bomba y de la cisterna, tal como lo informa el control de
  * llenado. Si el equipo no manda esos datos (firmware anterior), no se muestra.
  */
-export function SystemPanel({ control, isStale }: SystemPanelProps) {
+export function SystemPanel({ control, isStale, onCisternPress }: SystemPanelProps) {
   const theme = useTheme();
   if (!control) return null;
 
@@ -142,10 +144,17 @@ export function SystemPanel({ control, isStale }: SystemPanelProps) {
           </View>
         </View>
 
-        <View
-          style={[styles.tile, { backgroundColor: theme.surface, borderColor: theme.hairline }]}
-          accessibilityRole="text"
-          accessibilityLabel={`Cisterna: ${cisternLabel}`}>
+        <Pressable
+          onPress={onCisternPress}
+          disabled={!onCisternPress}
+          style={({ pressed }) => [
+            styles.tile,
+            { backgroundColor: theme.surface, borderColor: theme.hairline },
+            pressed && styles.pressed,
+          ]}
+          accessibilityRole={onCisternPress ? 'button' : 'text'}
+          accessibilityLabel={`Cisterna: ${cisternLabel}`}
+          accessibilityHint={onCisternPress ? 'Alterna la cisterna simulada entre con agua y vacía' : undefined}>
           <CisternIcon hasWater={control.cisternHasWater} color={cisternColor} />
           <View style={styles.tileText}>
             <ThemedText type="label" themeColor="textTertiary">
@@ -160,7 +169,7 @@ export function SystemPanel({ control, isStale }: SystemPanelProps) {
               {cisternDetail}
             </ThemedText>
           </View>
-        </View>
+        </Pressable>
       </View>
 
       <ThemedText type="caption" themeColor="textTertiary" style={styles.rule}>
@@ -176,6 +185,9 @@ const styles = StyleSheet.create({
   },
   stale: {
     opacity: 0.55,
+  },
+  pressed: {
+    opacity: 0.6,
   },
   row: {
     flexDirection: 'row',
